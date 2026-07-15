@@ -6,10 +6,11 @@ WORKDIR /app
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # Copy project files
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml ./
 
-# Install dependencies (no project, just deps, using China PyPI mirror)
-RUN uv sync --frozen --no-dev --no-install-project --index-url https://mirrors.aliyun.com/pypi/simple/ --extra-index-url https://pypi.tuna.tsinghua.edu.cn/simple/
+# Regenerate lockfile using China PyPI mirror, then install dependencies
+RUN uv lock --index-url https://mirrors.aliyun.com/pypi/simple/ \
+    && uv sync --no-dev --no-install-project
 
 # Copy application code
 COPY app/ ./app/
