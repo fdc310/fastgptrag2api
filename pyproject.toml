@@ -8,6 +8,7 @@ dependencies = [
     "aiomysql>=0.3.2",
     "fastapi>=0.139.0",
     "httpx>=0.28.1",
+    "pycryptodome>=3.21.0",
     "pydantic-settings>=2.14.2",
     "pymysql>=1.2.0",
     "python-dotenv>=1.2.2",

@@ -18,7 +18,7 @@ async def request_id_middleware(request: Request, call_next) -> Response:
 
     response.headers["X-Request-ID"] = rid
 
-    device = request.headers.get("X-Device-Name", "-")
+    device = getattr(request.state, "device_name", None) or "-"
     logger.info(
         "%s | %s %s | %s | %sms | device=%s",
         rid,

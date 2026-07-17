@@ -11,8 +11,9 @@ class Settings(BaseSettings):
     db_password: str = ""
     db_name: str = "fastgpt_rag"
 
-    # API key for caller authentication (separate from FastGPT key)
-    api_key: str = ""
+    # AES-256-CBC authentication
+    aes_secret_key: str = ""          # 64-char hex (32 bytes)
+    aes_token_ttl: int = 300          # seconds, timestamp validation window
 
     app_port: int = 8000
     app_workers: int = 1

@@ -1,6 +1,11 @@
+import base64
+import json
 import logging
-import secrets
+import os
 import time
+
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import unpad
 from fastapi import Depends, Header, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,20 +37,76 @@ def _cache_set(key: str, dataset_id: str) -> None:
     _dataset_cache[key] = (dataset_id, time.monotonic() + _CACHE_TTL)
 
 
-async def verify_api_key(authorization: str | None = Header(default=None, alias="Authorization")) -> None:
-    """Validate the caller's API key against the one configured in .env."""
-    if not settings.api_key:
-        raise HTTPException(status_code=500, detail="API_KEY not configured on server")
+def decrypt_aes_token(token: str) -> dict:
+    """Decrypt an AES-256-CBC token and validate the timestamp.
+
+    Expected plaintext JSON: {"device_name": "...", "timestamp": ..., "nonce": "..."}
+    Token format: base64(IV[16 bytes] + ciphertext)
+    """
+    if not settings.aes_secret_key:
+        raise HTTPException(status_code=500, detail="AES_SECRET_KEY not configured on server")
+
+    try:
+        raw = base64.urlsafe_b64decode(token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token: bad base64")
+
+    if len(raw) < 16 + AES.block_size:
+        raise HTTPException(status_code=401, detail="Invalid token: too short")
+
+    iv = raw[:16]
+    ciphertext = raw[16:]
+
+    try:
+        key = bytes.fromhex(settings.aes_secret_key)
+    except ValueError:
+        raise HTTPException(status_code=500, detail="AES_SECRET_KEY must be hex-encoded")
+
+    try:
+        cipher = AES.new(key, AES.MODE_CBC, iv)
+        plaintext = unpad(cipher.decrypt(ciphertext), AES.block_size)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token: decryption failed")
+
+    try:
+        payload = json.loads(plaintext.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise HTTPException(status_code=401, detail="Invalid token: bad payload")
+
+    device_name = payload.get("device_name")
+    ts = payload.get("timestamp")
+
+    if not device_name or ts is None:
+        raise HTTPException(status_code=401, detail="Invalid token: missing device_name or timestamp")
+
+    # Validate timestamp
+    now = time.time()
+    ttl = settings.aes_token_ttl
+    if abs(now - ts) > ttl:
+        raise HTTPException(status_code=401, detail="Token expired")
+
+    return payload
+
+
+async def verify_aes_token(authorization: str | None = Header(default=None, alias="Authorization")) -> str:
+    """Extract and validate the AES token from Authorization header.
+
+    Returns the decrypted device_name.
+    """
     if authorization is None:
         raise HTTPException(status_code=401, detail="Missing Authorization header")
-    expected = f"Bearer {settings.api_key}"
-    if not secrets.compare_digest(authorization, expected):
-        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    # Expect "Bearer <token>"
+    parts = authorization.split(" ", 1)
+    if len(parts) != 2 or parts[0] != "Bearer":
+        raise HTTPException(status_code=401, detail="Invalid Authorization format, expected 'Bearer <token>'")
+
+    payload = decrypt_aes_token(parts[1])
+    return payload["device_name"]
 
 
 async def get_device_dataset_id(
-    x_device_name: str = Header(..., alias="X-Device-Name"),
-    _auth: None = Depends(verify_api_key),
+    device_name: str = Depends(verify_aes_token),
     db: AsyncSession = Depends(get_db),
 ) -> str:
     """Resolve the latest active FastGPT dataset_id for a given device name.
@@ -54,9 +115,9 @@ async def get_device_dataset_id(
     filters out deleted records on both sides, takes the last row by id DESC.
     Results are cached in memory for 5 minutes.
     """
-    cached = _cache_get(x_device_name)
+    cached = _cache_get(device_name)
     if cached is not None:
-        logger.debug("cache hit  device=%s dataset_id=%s", x_device_name, cached)
+        logger.debug("cache hit  device=%s dataset_id=%s", device_name, cached)
         return cached
 
     t0 = time.monotonic()
@@ -64,7 +125,7 @@ async def get_device_dataset_id(
         select(MemberRobotAttributes.dataset_id, MemberRobotAttributes.member_id)
         .join(SettingRobot, MemberRobotAttributes.robot_id == SettingRobot.id)
         .where(
-            SettingRobot.device_name == x_device_name,
+            SettingRobot.device_name == device_name,
             SettingRobot.is_delete == 0,
             MemberRobotAttributes.is_delete == 0,
         )
@@ -74,14 +135,14 @@ async def get_device_dataset_id(
     row = result.first()
     elapsed = round((time.monotonic() - t0) * 1000)
     if row is None:
-        logger.warning("device=%s not found or disabled | db=%sms", x_device_name, elapsed)
+        logger.warning("device=%s not found or disabled | db=%sms", device_name, elapsed)
         raise HTTPException(status_code=404, detail="No active dataset found for this device name")
     if not row.dataset_id:
-        logger.warning("device=%s has no dataset_id bound | db=%sms", x_device_name, elapsed)
+        logger.warning("device=%s has no dataset_id bound | db=%sms", device_name, elapsed)
         raise HTTPException(status_code=404, detail="Device has no dataset_id bound")
 
-    logger.info("device=%s resolved to dataset_id=%s | db=%sms", x_device_name, row.dataset_id, elapsed)
-    _cache_set(x_device_name, row.dataset_id)
+    logger.info("device=%s resolved to dataset_id=%s | db=%sms", device_name, row.dataset_id, elapsed)
+    _cache_set(device_name, row.dataset_id)
     return row.dataset_id
 
 
