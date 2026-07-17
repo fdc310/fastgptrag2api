@@ -22,12 +22,11 @@ from dotenv import load_dotenv
 
 
 def generate_token(device_name: str, key_hex: str) -> str:
-    """Encrypt device_name + timestamp + nonce into a bearer token."""
+    """Encrypt device_name + timestamp into a bearer token."""
     key = bytes.fromhex(key_hex)
     payload = json.dumps({
         "device_name": device_name,
         "timestamp": int(time.time()),
-        "nonce": os.urandom(4).hex(),
     }).encode("utf-8")
 
     iv = os.urandom(16)

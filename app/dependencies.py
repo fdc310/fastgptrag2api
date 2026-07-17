@@ -1,7 +1,6 @@
 import base64
 import json
 import logging
-import os
 import time
 
 from Crypto.Cipher import AES
@@ -40,7 +39,7 @@ def _cache_set(key: str, dataset_id: str) -> None:
 def decrypt_aes_token(token: str) -> dict:
     """Decrypt an AES-256-CBC token and validate the timestamp.
 
-    Expected plaintext JSON: {"device_name": "...", "timestamp": ..., "nonce": "..."}
+    Expected plaintext JSON: {"device_name": "...", "timestamp": ...}
     Token format: base64(IV[16 bytes] + ciphertext)
     """
     if not settings.aes_secret_key:

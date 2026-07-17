@@ -1,4 +1,4 @@
-﻿"""Startup script: reads APP_PORT and APP_WORKERS from .env, then launches uvicorn."""
+"""Startup script: reads APP_PORT and APP_WORKERS from .env, then launches uvicorn."""
 import os
 import uvicorn
 from dotenv import load_dotenv

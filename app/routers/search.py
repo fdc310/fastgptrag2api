@@ -1,4 +1,4 @@
-﻿from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends
 
 from ..dependencies import get_device_dataset_id
 from ..fastgpt_client import fastgpt_client

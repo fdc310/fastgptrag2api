@@ -5,12 +5,12 @@ A FastAPI wrapper around FastGPT knowledge base OpenAPI, adding device-name base
 ## Architecture
 
 ```
-Client  --X-Device-Name + Bearer token-->  This API  --Bearer token-->  FastGPT
-                                              |
-                                      MySQL (ya_setting_robot / ya_member_robot_attributes)
+Client  --Bearer AES token (device_name inside)-->  This API  --Bearer token-->  FastGPT
+                                                          |
+                                                  MySQL (ya_setting_robot / ya_member_robot_attributes)
 ```
 
-- `X-Device-Name` resolves to a device in the `ya_setting_robot` table
+- The AES token carries `device_name`, which resolves to a device in the `ya_setting_robot` table
 - The device's `dataset_id` is looked up from `ya_member_robot_attributes`
 - All subsequent operations verify ownership before forwarding to FastGPT
 - Results are cached in memory for 5 minutes
@@ -32,12 +32,19 @@ docker compose up -d
 
 ## Authentication
 
-All endpoints except `/health` require two headers:
+All endpoints except `/health` require a single header:
 
 | Header | Required | Description |
 |---|---|---|
-| `Authorization` | Yes | `Bearer <API_KEY>`, configured as `API_KEY` in `.env` |
-| `X-Device-Name` | Yes | Device name, resolves to a FastGPT dataset |
+| `Authorization` | Yes | `Bearer <AES_TOKEN>`, an AES-256-CBC encrypted token carrying `device_name` + `timestamp` |
+
+The token plaintext is `{"device_name": "...", "timestamp": ...}`, encrypted as `base64url(IV[16] + ciphertext)`. The server decrypts it with `AES_SECRET_KEY` (from `.env`) and rejects tokens older than `AES_TOKEN_TTL` (default 300s).
+
+Generate a token with the bundled script:
+
+```bash
+python scripts/generate_token.py <device_name>
+```
 
 ## API Endpoints
 

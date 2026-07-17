@@ -2,20 +2,27 @@
 
 ## 概述
 
-本服务是 FastGPT 知识库 OpenAPI 的封装层。通过设备名称（`X-Device-Name`）从 MySQL 数据库中查询对应的 FastGPT `dataset_id`，然后将所有操作转发给 FastGPT。
+本服务是 FastGPT 知识库 OpenAPI 的封装层。通过 AES token 中的设备名称（`device_name`）从 MySQL 数据库中查询对应的 FastGPT `dataset_id`，然后将所有操作转发给 FastGPT。
 
 调用方**无需知道 `dataset_id`**，服务端会自动解析。
 
 ## 鉴权
 
-除 `/health` 外，所有接口都需要以下两个请求头：
+除 `/health` 外，所有接口都需要一个请求头：
 
 | 请求头 | 必填 | 说明 |
 |---|---|---|
-| `Authorization` | 是 | `Bearer <API_KEY>`，API Key 在服务端 `.env` 中配置 |
-| `X-Device-Name` | 是 | 设备名称，用于解析对应的知识库 |
+| `Authorization` | 是 | `Bearer <AES_TOKEN>`，AES-256-CBC 加密的 token，内含 `device_name` + `timestamp` |
 
-缺少或错误的 `Authorization` 返回 `401`。无法解析的 `X-Device-Name` 返回 `404`。
+Token 明文为 `{"device_name": "...", "timestamp": ...}`，加密格式为 `base64url(IV[16字节] + 密文)`。服务端用 `.env` 中的 `AES_SECRET_KEY` 解密，并校验 `timestamp` 与当前时间的偏差不超过 `AES_TOKEN_TTL`（默认 300 秒）。
+
+使用自带脚本生成 token：
+
+```bash
+python scripts/generate_token.py <device_name>
+```
+
+缺少或错误的 `Authorization` 返回 `401`，token 过期也返回 `401`。设备名无法解析返回 `404`。
 
 ## 响应格式
 
@@ -58,13 +65,12 @@ FastGPT 的响应原样转发，标准格式：
 
 获取当前设备绑定的知识库详情。
 
-**请求头：** `Authorization`、`X-Device-Name`
+**请求头：** `Authorization`
 
 **示例：**
 ```bash
 curl -X GET http://localhost:8000/datasets \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "X-Device-Name: test_07"
+  -H "Authorization: Bearer YOUR_AES_TOKEN"
 ```
 
 **响应示例：**
@@ -89,7 +95,7 @@ curl -X GET http://localhost:8000/datasets \
 
 列出知识库中的集合。
 
-**请求头：** `Authorization`、`X-Device-Name`
+**请求头：** `Authorization`
 
 **请求体：**
 ```json
@@ -250,7 +256,7 @@ curl -X GET http://localhost:8000/datasets \
 
 ### POST /search
 
-在 `X-Device-Name` 解析出的知识库中搜索。
+在 token 中 `device_name` 解析出的知识库中搜索。
 
 **请求体：**
 ```json
@@ -290,8 +296,7 @@ curl -X GET http://localhost:8000/datasets \
 **示例：**
 ```bash
 curl -X POST http://localhost:8000/search \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "X-Device-Name: test_07" \
+  -H "Authorization: Bearer YOUR_AES_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"text": "编程课多少钱", "searchMode": "embedding"}'
 ```
